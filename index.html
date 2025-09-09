@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auditoria de Outbound</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background: linear-gradient(to bottom,#243CE0, #3364E0, #438CE0);
+            background-attachment: fixed;
+            color: white;
+        }
+        table {
+            border-collapse: collapse;
+            width: 80%;
+            margin-top: 20px;
+            background-color: white;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+            color: black;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        select, input {
+            padding: 8px;
+            margin: 10px;
+            border-radius: 4px;
+            border: none;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #d32f2f;
+        }
+        .erro {
+            background-color: #ffcccc;
+        }
+        .status {
+            background-color: rgba(255, 255, 255, 0.8);
+            color: #333;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            color: #f44336;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+            font-weight: bold;
+        }
+        .status-wrapper {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+
+        #areaBipe{
+          display: flex;
+        }
+
+        #interacao{
+          display: flex;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 90%;
+            max-width: 900px;
+        }
+        .controls {
+            display: contents;
+            align-items: center;
+            
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .butao{
+          display: flex;
+          gap: 15px;
+        }
+
+        #rodape{            
+          position: relative;
+          padding: 20px;
+          left: 300px;
+          font: normal 10pt Arial;         
+        }
+
+        #bipe{
+          position: relative;
+          left: 5px;
+        }
+
+        #textoBipe{
+          position: relative;
+          font: bold 14pt Arial;
+          left: 10px;
+          bottom: 5px;
+        }        
+    </style>
+    <script>
+        let bipados = [];
+        let dadosJSON = {}; // Armazenar todos os dados da aba "DADOS"
+        let carregando = true;
+        let mapeamentoGruposTransportadoras = {}; // Mapeamento de grupos para transportadoras
+        let dadosAtuais = {};        
+
+        // Função para extrair a Nota Fiscal do DANFE (executada no cliente)
+        function extrairNotaFiscal(danfe) {
+            if (danfe && danfe.length === 44) {
+                return danfe.substring(26, 34); // Extrai os 8 dígitos da posição 27 a 34
+            }
+            return null;
+        }
+
+        // Fechar a mensagem de status
+        function fecharStatus() {
+            const statusElement = document.getElementById('status-wrapper');
+            statusElement.classList.add('hidden');
+        }
+
+        // Carregar todos os grupos de transportadoras
+        function carregarGruposTransportadoras(grupos) {
+            const select = document.getElementById('grupo-transportadora');
+            
+            // Limpar opções existentes
+            select.innerHTML = '';
+            
+            // Adicionar opção padrão
+            const optionPadrao = document.createElement('option');
+            optionPadrao.value = "";
+            optionPadrao.textContent = "Selecione a Transportadora";
+            select.appendChild(optionPadrao);
+            
+            // Adicionar todos os grupos
+            grupos.forEach(grupo => {
+                const option = document.createElement('option');
+                option.value = grupo;
+                option.textContent = grupo;
+                select.appendChild(option);
+            });
+            
+            // Atualizar status
+            atualizarStatus("Grupos de transportadoras carregados. Carregando mapeamento...");
+        }
+
+        // Carregar o mapeamento de grupos para transportadoras
+        function carregarMapeamento() {
+            google.script.run
+                .withSuccessHandler(function(mapeamento) {
+                    mapeamentoGruposTransportadoras = mapeamento;
+                    atualizarStatus("Mapeamento de grupos carregado. Carregando dados...");
+                    carregarDados();
+                })
+                .withFailureHandler(function(erro) {
+                    atualizarStatus("Erro ao carregar mapeamento: " + erro);
+                })
+                .obterMapeamentoGruposTransportadoras();
+        }
+
+        // Carregar todos os dados da aba "DADOS" como JSON
+        function carregarDados() {
+            atualizarStatus("Carregando dados...");
+            google.script.run
+                .withSuccessHandler(function(dados) {
+                    dadosJSON = dados;
+                    carregando = false;
+                    atualizarStatus("Dados carregados com sucesso! Total: " + Object.keys(dadosJSON).length + " registros");
+                    document.getElementById('codigo').focus();
+                })
+                .withFailureHandler(function(erro) {
+                    atualizarStatus("Erro ao carregar dados: " + erro);
+                    carregando = false;
+                })
+                .obterTodosOsDados();
+        }
+
+        // Atualizar o status na interface
+        function atualizarStatus(mensagem) {
+            const statusElement = document.getElementById('status');
+            const statusWrapper = document.getElementById('status-wrapper');
+            
+            if (mensagem) {
+                statusElement.textContent = mensagem;
+                statusWrapper.classList.remove('hidden');
+            } else {
+                statusWrapper.classList.add('hidden');
+            }
+        }
+
+        
+        // Verificar se o Enter foi pressionado
+        // Verificar se o Enter foi pressionado
+        function verificarEnter(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+
+                const grupoSelecionado = document.getElementById('grupo-transportadora').value;
+                if (!grupoSelecionado) {
+                    alert("Por favor, selecione uma transportadora antes de bipar.");
+                    document.getElementById('grupo-transportadora').focus();
+                    return;
+                }
+
+                const codigo = document.getElementById('codigo').value.trim();
+                if (codigo) {
+                    buscarDados(codigo);
+                    document.getElementById('codigo').value = ""; // Limpa o campo após pressionar Enter
+                }
+            }
+        }
+
+
+        // Buscar dados localmente usando o JSON
+        function buscarDados(danfe) {
+            if (carregando) {
+                alert("Os dados ainda estão carregando. Por favor, aguarde.");
+                return;
+            }
+
+            // Verificar se o código já foi bipado
+            // Extrair a Nota Fiscal do DANFE
+              const notaFiscal = extrairNotaFiscal(danfe);
+
+              // Verificar se já foi bipado com essa nota fiscal
+              if (notaFiscal && bipados.some(d => d.notaFiscal === notaFiscal)) {                  
+                  return;
+              }
+            
+            
+            if (notaFiscal && dadosJSON[notaFiscal]) {
+                // Dados encontrados no cache local
+                adicionarLinha(dadosJSON[notaFiscal]);
+            } else {
+                // Dados não encontrados
+                adicionarLinha({
+                    notaFiscal: extrairNotaFiscal(danfe),
+                    pedido: 'Fora do Banco de Dados',
+                    peso: '-',
+                    volumes: '-',
+                    transportadora: '-',
+                    grupoTransportadora: '-',
+                    valor: '-',
+                    erro: true
+                });
+            }
+        }
+
+        // Verificar se a transportadora pertence ao grupo selecionado
+        function transportadoraPertenceAoGrupo(transportadora, grupoSelecionado) {
+            if (!grupoSelecionado || grupoSelecionado === "GERAL") {
+                return true; // O grupo GERAL inclui todas as transportadoras
+            }
+            
+            return mapeamentoGruposTransportadoras[grupoSelecionado] && 
+                   mapeamentoGruposTransportadoras[grupoSelecionado].includes(transportadora);
+        }
+
+        // Adicionar linha à tabela
+        function adicionarLinha(dados) {
+            const grupoSelecionado = document.getElementById('grupo-transportadora').value;
+
+            // Clonar os dados para não modificar o objeto original
+            const dadosClone = {...dados};
+            
+            // Verificar se há erro (transportadora não pertence ao grupo selecionado)
+            if (dadosClone) {
+                dadosClone.erro = !transportadoraPertenceAoGrupo(dadosClone.transportadora, grupoSelecionado);
+                // Armazena o grupo selecionado no momento da bipagem
+                dadosClone.grupoTransportadoraSelecionado = grupoSelecionado;
+                bipados.unshift(dadosClone);
+            } else {
+                const novoDado = {
+                    notaFiscal: extrairNotaFiscal(danfe),
+                    pedido: 'Fora do Banco de Dados',
+                    peso: '-',
+                    volumes: '-',
+                    transportadora: '-',
+                    grupoTransportadora: '-',
+                    valor: '-',
+                    grupoTransportadoraSelecionado: grupoSelecionado,
+                    erro: true
+                };
+                bipados.unshift(novoDado);
+            }
+            atualizarTabela();
+        }
+        
+        // Remover linha da tabela
+        function removerLinha(index) {
+            bipados.splice(index, 1);
+            atualizarTabela();
+        }
+
+        // Atualizar a tabela com os dados bipados
+        function atualizarTabela() {
+            const tabela = document.getElementById('tabela-dados');
+            tabela.innerHTML = '';
+
+            // Contadores
+            let totalVolumes = 0;
+            let totalPeso = 0;
+            let totalPedidos = bipados.length;
+            
+            bipados.forEach((dados, index) => {
+                const row = tabela.insertRow();
+                if (dados.erro) row.classList.add('erro');
+
+                // Adicionar dados às células
+                row.insertCell().textContent = dados.notaFiscal || '-';
+                row.insertCell().textContent = dados.pedido || '-';
+                row.insertCell().textContent = dados.peso || '-';
+                row.insertCell().textContent = dados.volumes || '-';
+                row.insertCell().textContent = dados.transportadora || '-';
+                
+                
+                // Adicionar botão para remover
+                const cell = row.insertCell();
+                const btn = document.createElement('button');
+                btn.textContent = 'Remover';
+                btn.onclick = () => removerLinha(index);
+                cell.appendChild(btn);
+                
+                // Somar totais (apenas itens válidos)
+                if (dados.volumes && dados.volumes !== '-') {
+                    totalVolumes += parseFloat(dados.volumes) || 0;
+                }
+                if (dados.peso && dados.peso !== '-') {
+                    totalPeso += parseFloat(dados.peso) || 0;
+                }
+            });
+            
+            // Atualizar os contadores na interface
+            document.getElementById('total-pedidos').textContent = totalPedidos;            
+        }
+
+        // Salvar todos os dados bipados
+        function salvarTudo() {
+            if (bipados.length === 0) {
+                alert('Não há dados para salvar.');
+                return;
+            }
+            
+            atualizarStatus("Salvando dados...");
+            
+            google.script.run
+                .withSuccessHandler(function(resultado) {
+                    if (resultado) {
+                        alert('Todos os dados foram salvos com sucesso!');
+                        // Limpar os dados bipados após salvar
+                        bipados = [];
+                        atualizarTabela();
+                        atualizarStatus("Dados salvos. Pronto para nova operação.");
+                    } else {
+                        alert('Erro ao salvar os dados.');
+                    }
+                })
+                .withFailureHandler(function(erro) {
+                    alert('Erro ao salvar: ' + erro);
+                    atualizarStatus("Erro ao salvar dados.");
+                })
+                .salvarNaLancaTodos(bipados);
+        }
+        
+        // Inicializar a página
+        document.addEventListener('DOMContentLoaded', function() {
+            // Carregar grupos de transportadoras
+            google.script.run
+                .withSuccessHandler(function(grupos) {
+                    carregarGruposTransportadoras(grupos);
+                    carregarMapeamento(); // Após carregar grupos, carrega o mapeamento
+                })
+                .withFailureHandler(function(erro) {
+                    atualizarStatus("Erro ao carregar grupos de transportadoras: " + erro);
+                })
+                .obterGruposTransportadoras();
+        });
+
+        // Função para atualizar os dados manualmente sem perder os bipados
+      function atualizarDados() {
+        if (confirm("Deseja atualizar os dados da aba DADOS? Os itens bipados atuais NÃO serão perdidos.")) {
+            atualizarStatus("Atualizando dados...");
+
+            google.script.run
+                .withSuccessHandler(function(novosDados) {
+                    dadosJSON = novosDados;
+                    atualizarStatus("Dados atualizados com sucesso! Total: " + Object.keys(dadosJSON).length + " registros");
+
+                    // Reprocessa os bipados que estavam "Fora do Banco de Dados"
+                    bipados = bipados.map(item => {
+                        if (item.pedido === 'Fora do Banco de Dados' && item.notaFiscal) {
+                            const dadosAtualizados = dadosJSON[item.notaFiscal];
+
+                            if (dadosAtualizados) {
+                                // Mantém a transportadora escolhida manualmente (se tiver)
+                                dadosAtualizados.grupoTransportadoraSelecionado = item.grupoTransportadoraSelecionado;
+
+                                // Verifica erro novamente
+                                dadosAtualizados.erro = !transportadoraPertenceAoGrupo(
+                                    dadosAtualizados.transportadora, 
+                                    item.grupoTransportadoraSelecionado
+                                );
+
+                                return dadosAtualizados;
+                            }
+                        }
+
+                        return item; // Retorna o original se não for pra atualizar
+                    });
+
+                    atualizarTabela(); // Re-renderiza a tabela com os dados atualizados
+                })
+                .withFailureHandler(function(erro) {
+                    atualizarStatus("Erro ao atualizar dados: " + erro);
+                })
+                .obterTodosOsDados();
+        }
+    }
+
+    </script>
+</head>
+<body>   
+    
+    <div class="container">
+        <div id="status-wrapper" class="status-wrapper">
+            <div class="status">
+                <span id="status">Inicializando...</span>
+                <button class="close-btn" onclick="fecharStatus()">×</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+              <div id="interacao">
+                <div id="trans">
+                    <label for="grupo-transportadora"></label>
+                    <select id="grupo-transportadora">
+                        <option value="">Selecione a Transportadora</option>
+                    </select>
+                </div>
+                  <div id="areaBipe">
+                    <div id="textoBipe">
+                      <p>Bipe a DANFE 👉</p>
+                    </div>
+                    <div id="bipe">                
+                        <input id="codigo" onkeypress="verificarEnter(event)">
+                    </div>
+                  </div>
+              </div>
+            <div class="butao">
+              <button onclick="salvarTudo()">Salvar Tudo</button>   
+              <button onclick="atualizarDados()">Atualizar Dados</button>         
+            </div>
+            <div class="totais">
+                <p>Total de Pedidos: <span id="total-pedidos">0</span></p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nota Fiscal</th>
+                        <th>Número do Pedido</th>
+                        <th>Peso</th>
+                        <th>Volumes</th>
+                        <th>Transportadora</th>                    
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="tabela-dados"></tbody>
+            </table>
+      </div>
+
+    
+</body>
+</html>
